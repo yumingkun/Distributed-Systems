@@ -2,20 +2,32 @@
 
 6.824: Distributed Systems Engineering
 
+什么是分布式系统
 What is a distributed system?
+  多个合作的计算机
   multiple cooperating computers
+  绝大部分关键的基础设施都是分布式的
   DNS, P2P file sharing, big databases, MapReduce, &c
   lots of critical infrastructure is distributed!
 
+为什么要用分布式
 Why distribute?
+  抽象多个物理实体为一个虚拟实体
   to connect physically separate entities
+  通过隔离实现安全，毕竟一个大型机挂了就是挂了，集群挂了一个，把他屏蔽了，使用其他的
   to achieve security via isolation
+  通过复制？容忍错误
   to tolerate faults via replication
+  通过增加相同的主机弹性增强吞吐量
   to scale up throughput via parallel CPUs/mem/disk/net
 
+但是！
 But:
+  复杂：很多部分需要大量并发
   complex: many concurrent parts
+  要能处理错误情况
   must cope with partial failure
+  代码必须有高性能
   tricky to realize performance potential
 
 Why take this course?
@@ -43,25 +55,36 @@ Course components:
   labs
   final project
 
+读论文，做实验，上课什么的听力渣渣就别想了
 Lectures about big ideas, papers, and labs
 
+研究论文作为案例
 Readings: research papers as case studies
+  上课前腰读论文
   please read papers before class
     otherwise boring, and you can't pick it up by listening
+  每个论文都有问题，你需要回答一下
   each paper has a short question for you to answer
   and you must send us a question you have about the paper
   submit question&answer by 10pm the night before
 
 Mid-term exam in class, and final exam
 
+实验的目标
 Lab goals:
+  深入理解一些技术
   deeper understanding of some important techniques
+  有分布式变成经验
   experience with distributed programming
   first lab is due a week from Friday
 
+第一个实验，MapReduce
 Lab 1: MapReduce
+错误恢复
 Lab 2: replication for fault-tolerance
+错误存储
 Lab 3: fault-tolerant key/value store
+共享存储
 Lab 4: sharded key/value store
 
 Final project at the end, in groups of 2 or 3.

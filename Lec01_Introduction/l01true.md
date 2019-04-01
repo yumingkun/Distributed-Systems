@@ -5,8 +5,11 @@
 什么是分布式系统
 What is a distributed system?
   多个合作的计算机
+  
   multiple cooperating computers
+  
   绝大部分关键的基础设施都是分布式的
+  
   DNS, P2P file sharing, big databases, MapReduce, &c
   lots of critical infrastructure is distributed!
 

@@ -107,67 +107,104 @@ Debugging the labs can be time-consuming
 
 MAIN TOPICS
 
+这个课是关于被高层应用使用的基础架构
 This is a course about infrastructure, to be used by applications.
+     为高层应用隐藏底层架构细节 
   About abstractions that hide complexity of distribution from applications.
+  这里有三大抽象
   Three big kinds of abstraction:
+  	存储、通讯、计算
     Storage.
     Communication.
     Computation.
+  下面还有一些主题会被反复提起
   A couple of topics come up repeatedly.
 
+RPC、线程、并发控制的实现
 Topic: implementation
   RPC, threads, concurrency control.
 
+性能
 Topic: performance
+	理想：可伸缩的吞吐量
   The dream: scalable throughput.
+  	可以通过添加并行的硬件提升总的吞吐量，理论上处理更多的负载只需要添加机器
     Nx servers -> Nx total throughput via parallel CPU, disk, net.
     So handling more load only requires buying more computers.
+  伸缩性会变的越来越难
   Scaling gets progressively harder:
+  	负载均衡，单机性能故障(或反映太慢)
     Load balance, stragglers.
+          不可并行的部分
     "Small" non-parallelizable parts.
+          隐藏被共享的资源
     Hidden shared resources, e.g. network.
 
+错误处理
 Topic: fault tolerance
+  林子大了啥鸟都有，机器多了总有几个不听话的
   1000s of server, complex net -> always something broken
+  不应该让上层应用感知到有机器出错了
   We'd like to hide these failures from the application.
+	想要高可用、持久性  
   We often want:
     Availability -- I can keep using my files despite failures
     Durability -- my data will come back to life when failures are repaired
+    总结起来就是错误恢复
   Big idea: replicated servers.
     If one server crashes, client can proceed using the other.
 
+一致性
 Topic: consistency
+	目的：所有基础设施应该保持一致性
   General-purpose infrastructure needs well-defined behavior.
+  Get(k)获取最近放入的Put(k,v)，注意这个Put操作可能在A主机上实现，而Get在B主机上运行，他们之间数据应该保持一致
     E.g. "Get(k) yields the value from the most recent Put(k,v)."
+  达到一致性有点难
   Achieving good behavior is hard!
+  	客户端并发提交，某个服务器突然尴尬的宕机了，Network可能让核心节点以为某个反映太慢的节点死亡了
     Clients submit concurrent operations.
     Servers crash at awkward moments.
     Network may make live servers look dead; risk of "split brain".
+     一致和性能不可兼得
   Consistency and performance are enemies.
+  	一致需要通讯，严格实现一致的服务太慢了，快的系统不想要应用处理复杂行为
     Consistency requires communication, e.g. to get latest Put().
     Systems with pleasing ("strict") semantics are often slow.
     Fast systems often make applications cope with complex ("relaxed") behavior.
+    大佬们已经在这些问题上做了一些列的探究
   People have pursued many design points in this spectrum.
 
+
+案例研究
 CASE STUDY: MapReduce
 
 Let's talk about MapReduce (MR) as a case study
   MR is a good illustration of 6.824's main topics
   and is the focus of Lab 1
 
+总览一下
 MapReduce overview
+	几小时实现几T数据分布计算
   context: multi-hour computations on multi-terabyte data-sets
+  	爬取web页面结构的实验分析
     e.g. experimental analyses of structure of crawled web pages
+	如果你不喜欢分布式，开发会很痛苦的
     often not developed by distributed systems enthusiasts
     can be very painful, e.g. coping with failure
+  整体目标：非专业人士的程序也能很简单的用合理的效率解决解决大数据问题，
   overall goal: non-specialist programmers can easily solve giant
     data processing problems with reasonable efficiency.
+  程序定义了Map和Reduce函数，有序的代码总是清晰的
   programmer defines Map and Reduce functions
     sequential code; often fairly simple
+  MR有着巨大的数据量，运行在1000个机器以上，并且隐藏了所有实现细节
   MR runs the functions on 1000s of machines with huge inputs
     and hides all details of distribution
   
+MR的总览视角
 Abstract view of MapReduce
+  输入被分割到 "splits"
   input is divided into "splits"
   Input Map -> a,1 b,1 c,1
   Input Map ->     b,1
@@ -198,7 +235,7 @@ This model is easy to program; it hides many painful details:
 
 This model scales well.
   Nx computers get you Nx Map() and Reduce() throughput.
-    Map()s don't wait for each other or share data, can run in parallel.
+    Map()s don't wait for each other or share data, csan run in parallel.
     Same for Reduce()s.
     Up to a point...
   So you can get more throughput by buying more computers.

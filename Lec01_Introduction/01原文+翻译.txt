@@ -206,6 +206,10 @@ MR的总览视角
 Abstract view of MapReduce
   输入被分割到 "splits"
   input is divided into "splits"
+
+  先对要处理的数据做分割，分别传入到多个map函数中，传入(k1,v1)
+  map函数对接受的数据做处理，生成(k2,v2)，再交给reduce汇总
+  reduce从不同的map中接收到(k2,v2)，汇总为(k2,v3)
   Input Map -> a,1 b,1 c,1
   Input Map ->     b,1
   Input Map -> a,1     c,1
@@ -218,6 +222,10 @@ Abstract view of MapReduce
     and passes them to a Reduce call
   final output is set of <k2,v3> pairs from Reduce()
 
+例如：计算上千个文件中单词出现的个数
+    对每个文件调用map函数，传入文件名和文件内容(应该再传入一个用户可以自定义的处理函数)
+    map遍历文件，并统计每个单词的数量，生成单个文件的 []map[word]times 数组
+    把这个数组交给reduct汇总，得到所有文件的 []map[word]times
 Example: word count
   input is thousands of text files
   Map(k, v)
@@ -227,24 +235,32 @@ Example: word count
   Reduce(k, v)
     emit(len(v))
 
+这个模型很容易实现，它隐藏了很多应该处理的错误
 This model is easy to program; it hides many painful details:
+  并发 -- 顺序执行的结果
   concurrency -- same result as sequential execution
   starting s/w on servers
   data movement
   failures
 
+这个模型的伸缩性很好
 This model scales well.
+  多机器间不用相互依赖等待，他们并行运行
   Nx computers get you Nx Map() and Reduce() throughput.
     Map()s don't wait for each other or share data, csan run in parallel.
     Same for Reduce()s.
     Up to a point...
+  因此你能通过增加机器增加吞吐量
   So you can get more throughput by buying more computers.
     Rather than special-purpose efficient parallelizations of each application.
     Computers are much cheaper than programmers!
 
+性能瓶颈在哪
 What will be the limiting factor in performance?
+  我们很关心瓶颈，这是需要优化的地方
   We care since that's the thing to optimize.
   CPU? memory? disk? network?
+  被带宽限制了，上千个机器一起运算很快，但是很少有机器的带宽能承受上千机器传输，所以尽可能压缩传输数据
   They were limited by "network cross-section bandwidth".
     [diagram: map servers, network box, reduce servers]
     The network's total internal capacity.
@@ -252,32 +268,51 @@ What will be the limiting factor in performance?
   Hard to build a network than can run 1000x faster than a single computer.
   So they cared about minimizing movement of data over the network.
 
+容错处理呢
 What about fault tolerance?
+  如果有一个MR节点宕机？
+  该程序很大一部分就是用来容错的
+  肯定不能因为某个节点错误将所有节点重启，重新计算，只是将错误节点重启
   I.e. what if a server crashes during a MR job?
   Hiding failures is a huge part of ease of programming!
   Why not re-start the whole job from the beginning?
   MR re-runs just the failed Map()s and Reduce()s.
+    每个节点是纯功能型的，不修改任何输入，不维持状态，不共享内存，不和其他的map联系，即，节点间相互不依赖
     They are pure functions -- they don't modify their inputs,
       they don't keep state, there's no shared memory, there's
       no map/map or reduce/reduce interaction.
+    所以重新执行可以产生相同的结果
     So re-execution is likely to yield the same output.
+  没有副作用的纯功能型函数是这个模型的主要限制
   The requirement for pure functions is a major limitation of
     MR compared to other parallel programming schemes.
     But it's critical to MR's simplicity.
 
+
+更多细节
 More details (paper's Figure 1):
+  master:分配任务给workers，记忆中间输出的位置
   master: gives tasks to workers; remembers where intermediate output is
   M input splits
+  输入存储在GFS中，所有机器运行在GFS上，输入的splits比works更多
   input stored in GFS, 3 copies of each split
   all computers run both GFS and MR workers
   many more input splits than workers
+  master在每一个serever上开启任务，旧任务结束后开启新任务
   master starts a Map task on each server
     hands out new tasks as old ones finish
+  worker按照key将输出保存在磁盘中
   worker hashes Map output by key into R partitions, on local disk
+  直到所有的map调用结束后，开始reduce调用
   no Reduce calls until all Maps are finished
+  master指挥reducer从map worker中获取中间数据，并写入最终数据到GFS中
   master tells Reducers to fetch intermediate data partitions from Map workers
   Reduce workers write final output to GFS
 
+怎样能增强网络性能
+    Map的输出从disk中读取
+    中间数据只通过网络传输一次，并存储在disk中，而不是GFS
+    中间数据按照key被划分多个文件，大的文件传输更高效
 How does detailed design help network performance?
   Map input is read from local disks, not over network.
   Intermediate data goes over network just once.
@@ -285,6 +320,12 @@ How does detailed design help network performance?
   Intermediate data partitioned into files holding many keys.
     Big network transfers are more efficient.
 
+怎样实现好的负载均衡
+    在不同大小、内容、硬件加运行某需要的时间是不一样的
+    解决方案：创造比workers更多的splits
+        不断的给完成任务的worker分配新的任务
+        所以split不能很大，应该控制着运行的时间
+        这样，性能强的机器处理任务更多，慢的少一点，但尽可能同时处理完
 How do they get good load balance?
   Critical to scaling -- otherwise Nx servers -> no gain.
   But time to process a split or partition isn't uniform.
@@ -293,6 +334,12 @@ How do they get good load balance?
     Master hands out new splits to workers who finish previous tasks.
     So no split is so big it dominates completion time (hopefully).
     So faster servers do more work than slower ones, finish abt the same time.
+
+MR如何处理worker宕机
+    worker宕机：
+        重启master，通过GFS发布任务,即使一些worker已经完成任务了，还是需要他们硬盘上的数据
+        一些reduct的work可能会读取中间数据失败，所以我们需要函数式的确定的Map()
+    master节点怎么知道哪个节点宕机呢,Pings
 
 How does MR cope with worker crashes?
   * Map worker crashes:
@@ -309,6 +356,12 @@ How does MR cope with worker crashes?
     GFS has atomic rename that prevents output from being visible until complete.
     so it's safe for the master to re-run the Reduce tasks somewhere else.
 
+其他一些问题
+    如果master不小心mao()两次，它应该告诉reduce只处理一次
+    如果对同一部分做了两次Reduce()，他们应该写入相同的输出在GFS上，GFS的原子操作将被出发，只有一个能成功写入
+    如果一个节点可能因为垃圾硬件工作太慢，master应该对最后的这些任务做二次拷贝
+    如果一个worker因为软件或硬件计算错误结果怎么办，没办法了。。。
+    如果master崩了咋办
 Other failures/problems:
   * What if the master accidentally starts *two* Map() workers on same input?
     it will tell Reduce workers about only one of them.
@@ -322,6 +375,12 @@ Other failures/problems:
     too bad! MR assumes "fail-stop" CPUs and software.
   * What if the master crashes?
 
+哪些应用不适合在MR上运行
+    不是任何都适合这种模型
+    小数据不适合
+    大数据的小更新不适合，还是小数据。。。
+    不稳定的读取不适合
+    可以实现更灵活的系统，但是带来更复杂的模型
 For what applications *doesn't* MapReduce work well?
   Not everything fits the map/shuffle/reduce pattern.
   Small data, since overheads are high. E.g. not web site back-end.
@@ -330,6 +389,12 @@ For what applications *doesn't* MapReduce work well?
   Multiple shuffles, e.g. page-rank (can use multiple MR but not very efficient)
   More flexible systems allow these, but more complex model.
 
+总结
+    MR大集群
+        不是最高效和灵活的
+        伸缩性很好
+        编程也简单，容错比较好
+    在实践中，你应该权衡一下，怎么使用
 Conclusion
   MapReduce single-handedly made big cluster computation popular.
   - Not the most efficient or flexible.
